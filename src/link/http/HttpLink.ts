@@ -147,6 +147,7 @@ function readMultipartBody(
   const messageBoundary = '--' + boundary;
   // TODO: End message boundary
   const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+  let result: any = {};
   (function read() {
     reader.read()
       .then(iteration => {
@@ -174,8 +175,29 @@ function readMultipartBody(
             }
 
             const body = message.slice(i);
-            const result = parseJSONBody(response, body);
-            observer.next?.(result);
+            const result1 = parseJSONBody(response, body);
+            const path = result1.path || [];
+            if (path.length) {
+              // TODO: abstract this stuff or use already defined utilities
+              // TODO: immutability???
+              let currentData = result.data;
+              for (let i = 0; i < path.length - 1; i++) {
+                const key = path[i];
+                let currentData1 = currentData[key];
+                if (currentData1 === void 0) {
+                  currentData1 = typeof key === "number" ? [] : {};
+                  currentData[key] = currentData1;
+                }
+
+                currentData = currentData1;
+              }
+
+              const lastKey = path[path.length - 1];
+              currentData[lastKey] = {...currentData[lastKey], ...result1.data};
+              observer.next?.({...result});
+            } else {
+              observer.next?.(result = result1);
+            }
           }
 
           bi = buffer.indexOf(messageBoundary);
@@ -326,18 +348,16 @@ export class HttpLink extends ApolloLink {
               // TODO: detect and handle node streams
               } else if (response.body) {
                 throw new Error('TODO');
+              } else {
+                throw new Error(
+                  'Streaming bodies not supported by provided fetch implementation',
+                );
               }
-
-              throw new Error(
-                'Streaming bodies not supported by provided fetch implementation',
-              );
             } else {
               readJSONBody(response, operation, observer);
             }
           })
-          // TODO: handle fetch errors closer to the fetcher stuff
           .catch(err => handleError(err, observer));
-
         return () => {
           if (controller) controller.abort();
         };
